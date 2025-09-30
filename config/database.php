@@ -1,8 +1,8 @@
 <?php
 class Database {
     private $host = "localhost";
-    private $db_name = "u834808878_db_mdva";
-    private $username = "u834808878_admin_mdva";
+    private $db_name = "u834808878__db_mdva";
+    private $username = "u834808878__admin_mdva";
     private $password = "Ossouka@1968";
     public $conn;
 

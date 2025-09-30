@@ -1,235 +1,24 @@
-# MDVA Web Portal .htaccess
-# Security and Configuration Settings
-
-# Enable rewrite engine
+# MDVA Basic .htaccess - Minimal Version
 RewriteEngine On
 
-# Force HTTPS (uncomment when SSL is enabled)
-# RewriteCond %{HTTPS} off
-# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
-
-# Remove trailing slashes
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)/$ /$1 [L,R=301]
-
-# Remove .php extension from URLs
+# Remove .php extension
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME}\.php -f
 RewriteRule ^(.*)$ $1.php [L]
 
-# Pretty URLs for main pages
-RewriteRule ^login$ auth/login.php [L]
-RewriteRule ^register$ auth/register.php [L]
-RewriteRule ^logout$ auth/logout.php [L]
-RewriteRule ^admin/dashboard$ admin/dashboard.php [L]
-RewriteRule ^admin/charities$ admin/manage_charities.php [L]
-RewriteRule ^charity/dashboard$ charity/dashboard.php [L]
+# Basic security - block direct access to sensitive directories
+RewriteRule ^(config|includes)/ - [F,L]
 
-# API endpoints
-RewriteRule ^api/charities$ api/charities.php [L]
-RewriteRule ^api/donations$ api/donations.php [L]
-RewriteRule ^api/donors$ api/donors.php [L]
+# Allow access to index.php
+DirectoryIndex index.php index.html
 
-# Security Headers
+# Enable CORS for API
 <IfModule mod_headers.c>
-    # Prevent MIME type sniffing
-    Header always set X-Content-Type-Options "nosniff"
-    
-    # Enable XSS protection
-    Header always set X-XSS-Protection "1; mode=block"
-    
-    # Prevent clickjacking
-    Header always set X-Frame-Options "SAMEORIGIN"
-    
-    # Content Security Policy
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' ws://localhost:8080;"
-    
-    # Referrer Policy
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    
-    # Permissions Policy
-    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
-</IfModule>
-
-# Block access to sensitive files and directories
-<FilesMatch "\.(env|ini|log|sh|sql|tpl|twig|yml|yaml)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Protect specific directories
-<DirectoryMatch "/(config|includes|auth|admin|charity|api)/">
-    # Allow access only from specific IPs (uncomment and modify as needed)
-    # Order deny,allow
-    # Deny from all
-    # Allow from 192.168.1.0/24
-    # Allow from 127.0.0.1
-    
-    # Alternatively, use authentication
-    AuthType Basic
-    AuthName "Restricted Area"
-    AuthUserFile /path/to/.htpasswd
-    Require valid-user
-</DirectoryMatch>
-
-# Specific file protections
-<Files "config/database.php">
-    Order allow,deny
-    Deny from all
-</Files>
-
-<Files "includes/functions.php">
-    Order allow,deny
-    Deny from all
-</Files>
-
-<Files "\.htaccess">
-    Order allow,deny
-    Deny from all
-</Files>
-
-# Prevent access to backup and source files
-<FilesMatch "\.(bak|backup|save|sav|old|orig|original|copy|tmp)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Error Pages
-ErrorDocument 400 /error.php?code=400
-ErrorDocument 401 /error.php?code=401
-ErrorDocument 403 /error.php?code=403
-ErrorDocument 404 /error.php?code=404
-ErrorDocument 500 /error.php?code=500
-ErrorDocument 503 /error.php?code=503
-
-# Cache Control
-<IfModule mod_expires.c>
-    ExpiresActive On
-    
-    # Images
-    ExpiresByType image/jpg "access plus 1 month"
-    ExpiresByType image/jpeg "access plus 1 month"
-    ExpiresByType image/gif "access plus 1 month"
-    ExpiresByType image/png "access plus 1 month"
-    ExpiresByType image/svg+xml "access plus 1 month"
-    ExpiresByType image/webp "access plus 1 month"
-    
-    # CSS and JavaScript
-    ExpiresByType text/css "access plus 1 month"
-    ExpiresByType application/javascript "access plus 1 month"
-    ExpiresByType application/x-javascript "access plus 1 month"
-    
-    # Fonts
-    ExpiresByType font/woff "access plus 1 year"
-    ExpiresByType font/woff2 "access plus 1 year"
-    ExpiresByType application/font-woff "access plus 1 year"
-    ExpiresByType application/font-woff2 "access plus 1 year"
-    
-    # HTML
-    ExpiresByType text/html "access plus 1 hour"
-    
-    # Data
-    ExpiresByType application/json "access plus 0 seconds"
-    ExpiresByType application/xml "access plus 0 seconds"
-    ExpiresByType text/xml "access plus 0 seconds"
-</IfModule>
-
-# Compression
-<IfModule mod_deflate.c>
-    AddOutputFilterByType DEFLATE text/plain
-    AddOutputFilterByType DEFLATE text/html
-    AddOutputFilterByType DEFLATE text/xml
-    AddOutputFilterByType DEFLATE text/css
-    AddOutputFilterByType DEFLATE application/xml
-    AddOutputFilterByType DEFLATE application/xhtml+xml
-    AddOutputFilterByType DEFLATE application/rss+xml
-    AddOutputFilterByType DEFLATE application/javascript
-    AddOutputFilterByType DEFLATE application/x-javascript
-    AddOutputFilterByType DEFLATE application/json
-    AddOutputFilterByType DEFLATE font/woff
-    AddOutputFilterByType DEFLATE font/woff2
-</IfModule>
-
-# PHP Configuration Overrides
-<IfModule mod_php7.c>
-    php_value upload_max_filesize 10M
-    php_value post_max_size 10M
-    php_value max_execution_time 300
-    php_value max_input_time 300
-    php_value memory_limit 256M
-    php_value session.gc_maxlifetime 7200
-    php_value session.cookie_httponly 1
-    php_value session.cookie_secure 1
-    php_value session.use_strict_mode 1
-</IfModule>
-
-<IfModule mod_php.c>
-    php_value upload_max_filesize 10M
-    php_value post_max_size 10M
-    php_value max_execution_time 300
-    php_value max_input_time 300
-    php_value memory_limit 256M
-    php_value session.gc_maxlifetime 7200
-    php_value session.cookie_httponly 1
-    php_value session.cookie_secure 1
-    php_value session.use_strict_mode 1
-</IfModule>
-
-# Character encoding
-AddDefaultCharset UTF-8
-
-# Prevent directory listing
-Options -Indexes
-
-# Custom 403 Forbidden page
-RewriteCond %{REQUEST_FILENAME} -d
-RewriteRule ^(.*)$ - [F,L]
-
-# API CORS headers (for React Native app)
-<LocationMatch "/api/">
     Header always set Access-Control-Allow-Origin "*"
-    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
-    Header always set Access-Control-Allow-Credentials "true"
-</LocationMatch>
+    Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
+</IfModule>
 
-# Handle preflight requests for API
+# Handle preflight requests
 RewriteCond %{REQUEST_METHOD} OPTIONS
 RewriteRule ^(.*)$ $1 [R=200,L]
-
-# Block common exploit attempts
-RewriteCond %{QUERY_STRING} (\<|%3C).*script.*(\>|%3E) [NC,OR]
-RewriteCond %{QUERY_STRING} GLOBALS(=|\[|\%[0-9A-Z]{0,2}) [OR]
-RewriteCond %{QUERY_STRING} _REQUEST(=|\[|\%[0-9A-Z]{0,2})
-RewriteRule ^(.*)$ - [F,L]
-
-# Block WordPress specific attacks (in case of future integration)
-RewriteRule ^wp-admin/includes/ - [F,L]
-RewriteRule !^wp-includes/ - [S=3]
-RewriteRule ^wp-includes/[^/]+\.php$ - [F,L]
-RewriteRule ^wp-includes/js/tinymce/langs/.+\.php - [F,L]
-RewriteRule ^wp-includes/theme-compat/ - [F,L]
-
-# Rate limiting (requires mod_security)
-# <IfModule mod_security.c>
-#     SecRuleEngine On
-#     SecRule REQUEST_URI "/api/" "phase:1,deny,status:429,id:1001,msg:'Too many requests',chain"
-#     SecRule &REQUEST_HEADERS:Authorization "@eq 0" "chain"
-#     SecRule IP:api_requests "@gt 100" "setvar:ip.api_requests=+1,expirevar:ip.api_requests=60"
-# </IfModule>
-
-# Mobile redirect (optional - if you want a separate mobile site)
-# RewriteCond %{HTTP_USER_AGENT} "android|blackberry|iphone|ipod|iemobile|opera mobile|palmos|webos|googlebot-mobile" [NC]
-# RewriteCond %{HTTP_HOST} !^m\.
-# RewriteRule ^(.*)$ http://m.example.com/$1 [L,R=302]
-
-# Maintenance mode (uncomment when needed)
-# RewriteCond %{REMOTE_ADDR} !^123\.456\.789\.000
-# RewriteCond %{REQUEST_URI} !/maintenance\.html$
-# RewriteRule ^(.*)$ /maintenance.html [R=503,L]
-# ErrorDocument 503 /maintenance.html
