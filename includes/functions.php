@@ -215,14 +215,93 @@ function check_password_strength($password) {
 }
 
 /**
- * Generate QR code data for module
+ * Generate QR code data for Module MDVA
  */
-function generate_module_qr_data($module_id) {
-    return json_encode([
+function generateModuleQRData($module_id, $module_name = '', $location = '') {
+    $qr_data = [
         'module_id' => $module_id,
-        'type' => 'mdva_donation',
-        'timestamp' => time()
-    ]);
+        'module_name' => $module_name,
+        'location' => $location,
+        'system' => 'MDVA',
+        'type' => 'donation_module',
+        'version' => '1.0',
+        'timestamp' => time(),
+        'url' => "https://yoursite.com/donate.php?module=" . urlencode($module_id)
+    ];
+    
+    return json_encode($qr_data);
+}
+
+/**
+ * Generate single QR code for a module
+ */
+function generateModuleQRCode($module_id, $module_name = '', $location = '', $save_path = null) {
+    require_once 'Lib/phpqrcode/qrlib.php';
+    
+    $qr_data = generateModuleQRData($module_id, $module_name, $location);
+    
+    // If no save path provided, generate filename
+    if ($save_path === null) {
+        $qr_dir = "../qr_codes/";
+        if (!file_exists($qr_dir)) {
+            mkdir($qr_dir, 0755, true);
+        }
+        $save_path = $qr_dir . "mdva_module_" . $module_id . ".png";
+    }
+    
+    // Generate and save QR code
+    QRcode::png($qr_data, $save_path, QR_ECLEVEL_L, 10, 2);
+    
+    return $save_path;
+}
+
+/**
+ * Generate multiple QR codes for all modules
+ */
+function generateAllModuleQRCodes($db) {
+    require_once 'Lib/phpqrcode/qrlib.php';
+    
+    $qr_dir = "../qr_codes/";
+    if (!file_exists($qr_dir)) {
+        mkdir($qr_dir, 0755, true);
+    }
+    
+    // Get all active modules
+    $query = "SELECT m.*, l.name as location_name, l.address, l.city, l.state 
+              FROM modules m 
+              LEFT JOIN module_locations ml ON m.id = ml.module_id AND ml.status = 'active'
+              LEFT JOIN locations l ON ml.location_id = l.id 
+              WHERE m.status = 'active'";
+    $stmt = $db->prepare($query);
+    $stmt->execute();
+    $modules = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $generated = [];
+    
+    foreach ($modules as $module) {
+        $location = $module['location_name'] ? 
+            $module['location_name'] . ', ' . $module['address'] . ', ' . $module['city'] . ', ' . $module['state'] : 
+            $module['location'];
+            
+        $filename = "mdva_module_" . $module['module_id'] . ".png";
+        $filepath = $qr_dir . $filename;
+        
+        // Generate QR code using the single QR code function
+        generateModuleQRCode(
+            $module['module_id'],
+            $module['name'],
+            $location,
+            $filepath
+        );
+        
+        $generated[] = [
+            'module_id' => $module['module_id'],
+            'module_name' => $module['name'],
+            'qr_file' => $filename
+        ];
+    }
+    
+    return $generated;
 }
 
 /**
