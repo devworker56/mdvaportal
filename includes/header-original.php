@@ -49,15 +49,15 @@ session_start();
                     <?php if(isset($_SESSION['user_type'])): ?>
                         <?php if($_SESSION['user_type'] == 'charity'): ?>
                             <li class="nav-item">
-                                <a class="nav-link" href="../charity/dashboard.php">Dashboard</a>
+                                <a class="nav-link" href="charity/dashboard.php">Dashboard</a>
                             </li>
                         <?php elseif($_SESSION['user_type'] == 'admin'): ?>
                             <li class="nav-item">
-                                <a class="nav-link" href="../admin/dashboard.php">Admin Dashboard</a>
+                                <a class="nav-link" href="admin/dashboard.php">Admin Dashboard</a>
                             </li>
                         <?php endif; ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="../auth/logout.php">Logout</a>
+                            <a class="nav-link" href="auth/logout.php">Logout</a>
                         </li>
                     <?php else: ?>
                         <li class="nav-item">
