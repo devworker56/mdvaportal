@@ -175,6 +175,10 @@ function recordDonation($db, $data) {
 /**
  * Start a donation session (when donor scans QR code)
  */
+///-----------------------------------------------------------------------------------------------
+/**
+ * Start a donation session (when donor scans QR code and selects charity)
+ */
 function startDonationSession($db, $data) {
     $donor_id = $data['donor_id'] ?? '';
     $charity_id = $data['charity_id'] ?? '';
@@ -187,32 +191,43 @@ function startDonationSession($db, $data) {
     }
     
     // Verify donor exists
-    $query = "SELECT id FROM donors WHERE id = ?";
+    $query = "SELECT id, user_id FROM donors WHERE id = ?";
     $stmt = $db->prepare($query);
     $stmt->execute([$donor_id]);
-    if (!$stmt->fetch()) {
+    $donor = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$donor) {
         http_response_code(404);
         echo json_encode(['success' => false, 'message' => 'Donor not found']);
         return;
     }
     
     // Verify charity exists and is approved
-    $query = "SELECT id FROM charities WHERE id = ? AND approved = 1";
+    $query = "SELECT id, name FROM charities WHERE id = ? AND approved = 1";
     $stmt = $db->prepare($query);
     $stmt->execute([$charity_id]);
-    if (!$stmt->fetch()) {
+    $charity = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$charity) {
         http_response_code(404);
         echo json_encode(['success' => false, 'message' => 'Charity not found or not approved']);
         return;
     }
     
-    // Update donor's selected charity
-    $query = "UPDATE donors SET selected_charity_id = ? WHERE id = ?";
-    $stmt = $db->prepare($query);
+    // FIXED: Don't update donors table - we're doing per-donation charity selection
+    // Just create a session record or return success
     
-    if ($stmt->execute([$charity_id, $donor_id])) {
-        // In a real implementation, you would store the active session
-        // For now, we'll just return success
+    try {
+        // Create donation session record in a sessions table (if you have one)
+        // For now, we'll just create a verifiable transaction record
+        
+        $transaction_hash = create_verifiable_donation_session(
+            $donor_id,
+            $donor['user_id'],
+            $charity_id,
+            $module_id,
+            $db
+        );
         
         // Notify WebSocket about session start
         notify_websocket('session_started', [
@@ -224,19 +239,27 @@ function startDonationSession($db, $data) {
         
         echo json_encode([
             'success' => true, 
-            'message' => 'Donation session started',
+            'message' => 'Donation session started successfully',
             'session' => [
                 'donor_id' => $donor_id,
                 'charity_id' => $charity_id,
-                'module_id' => $module_id
+                'charity_name' => $charity['name'],
+                'module_id' => $module_id,
+                'transaction_hash' => $transaction_hash
             ]
         ]);
-    } else {
+        
+    } catch (Exception $e) {
         http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Failed to start donation session']);
+        error_log("Donation session error: " . $e->getMessage());
+        echo json_encode([
+            'success' => false, 
+            'message' => 'Failed to start donation session',
+            'error' => $e->getMessage()
+        ]);
     }
 }
-
+///-----------------------------------------------------------------------------------------------
 /**
  * Get donation statistics for a donor
  */
