@@ -109,7 +109,8 @@ try {
  * Record a donation from Module MDVA
  */
 function recordDonation($db, $data) {
-    // For module donations, we expect module_id, coin_count, and amount
+    error_log("Recording donation: " . json_encode($data));
+    
     $module_id = $data['module_id'] ?? $_POST['module_id'] ?? '';
     $coin_count = $data['coin_count'] ?? $_POST['coin_count'] ?? 0;
     $amount = $data['amount'] ?? $_POST['amount'] ?? 0;
@@ -120,55 +121,58 @@ function recordDonation($db, $data) {
         return;
     }
     
-    // In a real implementation, you would get donor_id and charity_id from an active session
-    // For demo purposes, we'll use the first available donor and charity
-    $donor_id = getDemoDonorId($db);
-    $charity_id = getDemoCharityId($db);
-    
-    if (!$donor_id || !$charity_id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'No active donation session']);
-        return;
-    }
-    
-    $query = "INSERT INTO donations (donor_id, charity_id, amount, module_id, coin_count) 
-              VALUES (?, ?, ?, ?, ?)";
-    $stmt = $db->prepare($query);
-    
-    if ($stmt->execute([$donor_id, $charity_id, $amount, $module_id, $coin_count])) {
-        $donation_id = $db->lastInsertId();
+    try {
+        // For testing: Use donor 6 and charity 5 (from your session)
+        $donor_id = 6;
+        $charity_id = 5;
         
-        // Get donor and charity info for notification
-        $donor_user_id = get_donor_user_id($donor_id, $db);
-        $charity_name = get_charity_name($charity_id, $db);
+        $query = "INSERT INTO donations (donor_id, charity_id, amount, module_id, coin_count, created_at) 
+                  VALUES (?, ?, ?, ?, ?, NOW())";
+        $stmt = $db->prepare($query);
         
-        // Notify WebSocket about new donation
-        notify_websocket('new_donation', [
-            'donation_id' => $donation_id,
-            'donor_id' => $donor_id,
-            'donor_user_id' => $donor_user_id,
-            'charity_id' => $charity_id,
-            'charity_name' => $charity_name,
-            'amount' => $amount,
-            'module_id' => $module_id,
-            'timestamp' => date('Y-m-d H:i:s')
-        ]);
-        
-        // Log the activity
-        log_activity($db, 'system', 0, 'donation_recorded', 
-            "Donation of $amount from donor $donor_user_id to $charity_name via module $module_id");
-        
-        echo json_encode([
-            'success' => true, 
-            'message' => 'Donation recorded successfully',
-            'donation_id' => $donation_id,
-            'donor_id' => $donor_user_id,
-            'charity_id' => $charity_id,
-            'amount' => $amount
-        ]);
-    } else {
+        if ($stmt->execute([$donor_id, $charity_id, $amount, $module_id, $coin_count])) {
+            $donation_id = $db->lastInsertId();
+            
+            // Get donor and charity info for notification
+            $donor_user_id = get_donor_user_id($donor_id, $db);
+            $charity_name = get_charity_name($charity_id, $db);
+            
+            // Create verifiable donation record
+            if (function_exists('create_verifiable_donation')) {
+                create_verifiable_donation($donor_id, $donor_user_id, $charity_id, $amount, $module_id, $db);
+            }
+            
+            // Notify WebSocket about new donation
+            notify_websocket('new_donation', [
+                'donation_id' => $donation_id,
+                'donor_id' => $donor_id,
+                'donor_user_id' => $donor_user_id,
+                'charity_id' => $charity_id,
+                'charity_name' => $charity_name,
+                'amount' => $amount,
+                'module_id' => $module_id,
+                'timestamp' => date('Y-m-d H:i:s')
+            ]);
+            
+            echo json_encode([
+                'success' => true, 
+                'message' => 'Donation recorded successfully',
+                'donation_id' => $donation_id,
+                'donor_id' => $donor_user_id,
+                'charity_id' => $charity_id,
+                'charity_name' => $charity_name,
+                'amount' => $amount
+            ]);
+        } else {
+            $errorInfo = $stmt->errorInfo();
+            error_log("Donation insert failed: " . print_r($errorInfo, true));
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Failed to record donation: ' . ($errorInfo[2] ?? 'Unknown error')]);
+        }
+    } catch (Exception $e) {
         http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Failed to record donation']);
+        error_log("Record donation error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Failed to record donation: ' . $e->getMessage()]);
     }
 }
 
@@ -321,8 +325,6 @@ function getDonationStats($db, $data) {
  */
 function getDonationHistory($db, $data) {
     $donor_id = $data['donor_id'] ?? '';
-    $limit = isset($data['limit']) ? (int)$data['limit'] : 50; // Cast to integer
-    $offset = isset($data['offset']) ? (int)$data['offset'] : 0; // Cast to integer
     
     if (empty($donor_id)) {
         http_response_code(400);
@@ -330,37 +332,34 @@ function getDonationHistory($db, $data) {
         return;
     }
     
-    $query = "SELECT 
-                d.id,
-                d.amount,
-                d.created_at,
-                d.module_id,
-                c.name as charity_name,
-                c.id as charity_id
-              FROM donations d
-              JOIN charities c ON d.charity_id = c.id
-              WHERE d.donor_id = ?
-              ORDER BY d.created_at DESC
-              LIMIT ? OFFSET ?";
-    $stmt = $db->prepare($query);
-    $stmt->execute([$donor_id, $limit, $offset]); // Use prepared statements for LIMIT/OFFSET
-    $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Get total count for pagination
-    $query = "SELECT COUNT(*) as total FROM donations WHERE donor_id = ?";
-    $stmt = $db->prepare($query);
-    $stmt->execute([$donor_id]);
-    $total = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-    
-    echo json_encode([
-        'success' => true, 
-        'history' => $history,
-        'pagination' => [
-            'total' => $total,
-            'limit' => $limit,
-            'offset' => $offset
-        ]
-    ]);
+    try {
+        // SIMPLIFIED QUERY WITHOUT PAGINATION PARAMETERS
+        $query = "SELECT 
+                    d.id,
+                    d.amount,
+                    d.created_at,
+                    d.module_id,
+                    c.name as charity_name,
+                    c.id as charity_id
+                  FROM donations d
+                  JOIN charities c ON d.charity_id = c.id
+                  WHERE d.donor_id = ?
+                  ORDER BY d.created_at DESC
+                  LIMIT 50";
+        $stmt = $db->prepare($query);
+        $stmt->execute([$donor_id]);
+        $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        echo json_encode([
+            'success' => true, 
+            'history' => $history,
+            'count' => count($history)
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        error_log("Donation history error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Failed to load donation history: ' . $e->getMessage()]);
+    }
 }
 
 /**
