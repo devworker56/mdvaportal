@@ -342,4 +342,226 @@ function get_system_stats($db) {
     
     return $stats;
 }
+
+// =============================================================================
+// FAIRGIVE VERIFIABLE TRANSACTION FUNCTIONS (Blockchain-esque System)
+// =============================================================================
+
+/**
+ * Get the last transaction hash for a donor to maintain hash chain
+ * Used for FairGive verifiable donation system
+ */
+function get_last_transaction_hash($donor_id, $db) {
+    $query = "SELECT transaction_hash FROM verifiable_transactions 
+              WHERE donor_id = ? 
+              ORDER BY id DESC 
+              LIMIT 1";
+    $stmt = $db->prepare($query);
+    $stmt->execute([$donor_id]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    return $result ? $result['transaction_hash'] : '0'; // Genesis hash for first transaction
+}
+
+/**
+ * Create initial verifiable transaction for new donors
+ * Used for FairGive verifiable donation system
+ */
+function create_initial_verifiable_transaction($donor_id, $user_id, $db) {
+    $timestamp = time();
+    
+    $transaction_data = [
+        'donor_id' => $user_id,
+        'action' => 'account_creation',
+        'timestamp' => $timestamp,
+        'previous_hash' => '0' // Genesis block
+    ];
+    
+    $transaction_data_json = json_encode($transaction_data);
+    $transaction_hash = hash('sha256', $transaction_data_json);
+    
+    $query = "INSERT INTO verifiable_transactions 
+              (donor_id, transaction_type, transaction_data, transaction_hash, previous_hash, timestamp) 
+              VALUES (?, 'account_creation', ?, ?, ?, ?)";
+    $stmt = $db->prepare($query);
+    $stmt->execute([
+        $donor_id, 
+        $transaction_data_json, 
+        $transaction_hash,
+        '0',
+        date('Y-m-d H:i:s')
+    ]);
+    
+    error_log("FairGive Initial Verifiable Record: Donor $user_id account created. Transaction Hash: $transaction_hash");
+    
+    return $transaction_hash;
+}
+
+/**
+ * Create verifiable charity selection record
+ * Used for FairGive verifiable donation system
+ */
+function create_verifiable_charity_selection($donor_id, $user_id, $old_charity_id, $new_charity_id, $charity_name, $db) {
+    $timestamp = time();
+    
+    // Get previous transaction hash to maintain chain
+    $previous_hash = get_last_transaction_hash($donor_id, $db);
+    
+    // Create transaction data for cryptographic hashing
+    $transaction_data = [
+        'donor_id' => $user_id,
+        'old_charity_id' => $old_charity_id,
+        'new_charity_id' => $new_charity_id,
+        'charity_name' => $charity_name,
+        'action' => 'charity_selection',
+        'timestamp' => $timestamp,
+        'previous_hash' => $previous_hash
+    ];
+    
+    // Generate cryptographic hash (blockchain-esque verification)
+    $transaction_data_json = json_encode($transaction_data);
+    $transaction_hash = hash('sha256', $transaction_data_json);
+    
+    // Store in verifiable transactions table
+    $query = "INSERT INTO verifiable_transactions 
+              (donor_id, transaction_type, transaction_data, transaction_hash, previous_hash, timestamp) 
+              VALUES (?, 'charity_selection', ?, ?, ?, ?)";
+    $stmt = $db->prepare($query);
+    $stmt->execute([
+        $donor_id, 
+        $transaction_data_json, 
+        $transaction_hash,
+        $previous_hash,
+        date('Y-m-d H:i:s')
+    ]);
+    
+    // Also log to audit table for immediate visibility and reporting
+    $query = "INSERT INTO charity_selection_audit 
+              (donor_id, old_charity_id, new_charity_id, transaction_hash, selected_at) 
+              VALUES (?, ?, ?, ?, NOW())";
+    $stmt = $db->prepare($query);
+    $stmt->execute([$donor_id, $old_charity_id, $new_charity_id, $transaction_hash]);
+    
+    error_log("FairGive Verifiable Record: Donor $user_id changed charity from $old_charity_id to $new_charity_id. Transaction Hash: $transaction_hash");
+    
+    return $transaction_hash;
+}
+
+/**
+ * Create verifiable donation record
+ * Used for FairGive verifiable donation system
+ */
+function create_verifiable_donation($donor_id, $user_id, $charity_id, $amount, $module_id, $db) {
+    $timestamp = time();
+    
+    // Get previous transaction hash to maintain chain
+    $previous_hash = get_last_transaction_hash($donor_id, $db);
+    
+    // Get charity name
+    $charity_name = get_charity_name($charity_id, $db);
+    
+    // Create transaction data for cryptographic hashing
+    $transaction_data = [
+        'donor_id' => $user_id,
+        'charity_id' => $charity_id,
+        'charity_name' => $charity_name,
+        'amount' => $amount,
+        'module_id' => $module_id,
+        'action' => 'donation',
+        'timestamp' => $timestamp,
+        'previous_hash' => $previous_hash
+    ];
+    
+    // Generate cryptographic hash (blockchain-esque verification)
+    $transaction_data_json = json_encode($transaction_data);
+    $transaction_hash = hash('sha256', $transaction_data_json);
+    
+    // Store in verifiable transactions table
+    $query = "INSERT INTO verifiable_transactions 
+              (donor_id, transaction_type, transaction_data, transaction_hash, previous_hash, timestamp) 
+              VALUES (?, 'donation', ?, ?, ?, ?)";
+    $stmt = $db->prepare($query);
+    $stmt->execute([
+        $donor_id, 
+        $transaction_data_json, 
+        $transaction_hash,
+        $previous_hash,
+        date('Y-m-d H:i:s')
+    ]);
+    
+    error_log("FairGive Verifiable Record: Donor $user_id donated $amount to $charity_name via module $module_id. Transaction Hash: $transaction_hash");
+    
+    return $transaction_hash;
+}
+
+/**
+ * Verify transaction chain integrity for a donor
+ * Used for FairGive verifiable donation system audit
+ */
+function verify_donor_transaction_chain($donor_id, $db) {
+    $query = "SELECT transaction_hash, previous_hash, transaction_data, timestamp 
+              FROM verifiable_transactions 
+              WHERE donor_id = ? 
+              ORDER BY id ASC";
+    $stmt = $db->prepare($query);
+    $stmt->execute([$donor_id]);
+    $transactions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    if (empty($transactions)) {
+        return ['valid' => true, 'message' => 'No transactions to verify'];
+    }
+    
+    $previous_hash = '0'; // Start with genesis hash
+    $issues = [];
+    
+    foreach ($transactions as $index => $transaction) {
+        // Check if previous hash matches
+        if ($transaction['previous_hash'] !== $previous_hash) {
+            $issues[] = "Transaction {$transaction['transaction_hash']} has incorrect previous hash. Expected: $previous_hash, Found: {$transaction['previous_hash']}";
+        }
+        
+        // Verify current hash is correct
+        $calculated_hash = hash('sha256', $transaction['transaction_data']);
+        if ($calculated_hash !== $transaction['transaction_hash']) {
+            $issues[] = "Transaction {$transaction['transaction_hash']} hash mismatch. Data may have been tampered with.";
+        }
+        
+        $previous_hash = $transaction['transaction_hash'];
+    }
+    
+    return [
+        'valid' => empty($issues),
+        'transaction_count' => count($transactions),
+        'issues' => $issues,
+        'last_transaction_hash' => end($transactions)['transaction_hash'] ?? null
+    ];
+}
+
+/**
+ * Get donor's verifiable transaction history
+ * Used for FairGive verifiable donation system reporting
+ */
+function get_donor_verifiable_history($donor_id, $db, $limit = 50) {
+    $query = "SELECT 
+                transaction_type,
+                transaction_data,
+                transaction_hash,
+                previous_hash,
+                timestamp
+              FROM verifiable_transactions 
+              WHERE donor_id = ? 
+              ORDER BY timestamp DESC 
+              LIMIT ?";
+    $stmt = $db->prepare($query);
+    $stmt->execute([$donor_id, $limit]);
+    $transactions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Parse transaction data
+    foreach ($transactions as &$transaction) {
+        $transaction['parsed_data'] = json_decode($transaction['transaction_data'], true);
+    }
+    
+    return $transactions;
+}
+
 ?>
