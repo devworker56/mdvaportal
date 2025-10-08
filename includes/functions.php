@@ -12,7 +12,53 @@ function sanitize_input($data) {
     $data = htmlspecialchars($data);
     return $data;
 }
-
+///-------------------------------------------------------------------------------------------
+/**
+ * Create verifiable donation session record
+ * Used when starting a donation session with per-donation charity selection
+ */
+function create_verifiable_donation_session($donor_id, $user_id, $charity_id, $module_id, $db) {
+    $timestamp = time();
+    
+    // Get previous transaction hash to maintain chain
+    $previous_hash = get_last_transaction_hash($donor_id, $db);
+    
+    // Get charity name
+    $charity_name = get_charity_name($charity_id, $db);
+    
+    // Create transaction data for cryptographic hashing
+    $transaction_data = [
+        'donor_id' => $user_id,
+        'charity_id' => $charity_id,
+        'charity_name' => $charity_name,
+        'module_id' => $module_id,
+        'action' => 'donation_session_start',
+        'timestamp' => $timestamp,
+        'previous_hash' => $previous_hash
+    ];
+    
+    // Generate cryptographic hash
+    $transaction_data_json = json_encode($transaction_data);
+    $transaction_hash = hash('sha256', $transaction_data_json);
+    
+    // Store in verifiable transactions table
+    $query = "INSERT INTO verifiable_transactions 
+              (donor_id, transaction_type, transaction_data, transaction_hash, previous_hash, timestamp) 
+              VALUES (?, 'donation_session', ?, ?, ?, ?)";
+    $stmt = $db->prepare($query);
+    $stmt->execute([
+        $donor_id, 
+        $transaction_data_json, 
+        $transaction_hash,
+        $previous_hash,
+        date('Y-m-d H:i:s')
+    ]);
+    
+    error_log("FairGive Donation Session: Donor $user_id starting session for $charity_name via module $module_id. Transaction Hash: $transaction_hash");
+    
+    return $transaction_hash;
+}
+///-------------------------------------------------------------------------------------------
 /**
  * Check if user is logged in
  */
