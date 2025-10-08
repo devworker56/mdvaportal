@@ -132,12 +132,20 @@ function get_donor_user_id($donor_id, $db) {
 /**
  * Log activity
  */
+/**
+ * Log activity (updated to use description column)
+ */
 function log_activity($db, $user_type, $user_id, $action, $details = '') {
-    $query = "INSERT INTO activity_logs (user_type, user_id, action, details) VALUES (?, ?, ?, ?)";
-    $stmt = $db->prepare($query);
-    $stmt->execute([$user_type, $user_id, $action, $details]);
+    try {
+        $query = "INSERT INTO activity_logs (user_type, user_id, action, description) VALUES (?, ?, ?, ?)";
+        $stmt = $db->prepare($query);
+        $stmt->execute([$user_type, $user_id, $action, $details]);
+        return true;
+    } catch (Exception $e) {
+        error_log("Activity log insert failed: " . $e->getMessage());
+        return false;
+    }
 }
-
 /**
  * Send notification to WebSocket server
  */
