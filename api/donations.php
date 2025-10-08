@@ -106,76 +106,98 @@ try {
 }
 
 /**
- * Record a donation from Module MDVA
+ * Record a donation from Module MDVA - FIXED VERSION
  */
 function recordDonation($db, $data) {
     error_log("Recording donation: " . json_encode($data));
     
-    $module_id = $data['module_id'] ?? $_POST['module_id'] ?? '';
-    $coin_count = $data['coin_count'] ?? $_POST['coin_count'] ?? 0;
-    $amount = $data['amount'] ?? $_POST['amount'] ?? 0;
+    $module_id = $data['module_id'] ?? '';
+    $coin_count = $data['coin_count'] ?? 0;
+    $amount = $data['amount'] ?? 0;
     
     if (empty($module_id) || $amount <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+        echo json_encode(['success' => false, 'message' => 'Missing required fields: module_id and amount > 0 required']);
         return;
     }
     
     try {
-        // For testing: Use donor 6 and charity 5 (from your session)
+        // For testing: Use donor 6 and get the last selected charity from sessions
         $donor_id = 6;
-        $charity_id = 5;
+        
+        // Get the most recent session to find the charity
+        $charity_query = "SELECT charity_id FROM verifiable_transactions 
+                         WHERE donor_id = ? AND transaction_type = 'donation_session' 
+                         ORDER BY id DESC LIMIT 1";
+        $charity_stmt = $db->prepare($charity_query);
+        $charity_stmt->execute([$donor_id]);
+        $session = $charity_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$session || !isset($session['charity_id'])) {
+            // Fallback to a default charity for testing
+            $charity_id = 5; // Animal Rescue League as fallback
+            error_log("No active session found, using fallback charity ID: " . $charity_id);
+        } else {
+            $charity_id = $session['charity_id'];
+            error_log("Found active session with charity ID: " . $charity_id);
+        }
         
         $query = "INSERT INTO donations (donor_id, charity_id, amount, module_id, coin_count, created_at) 
                   VALUES (?, ?, ?, ?, ?, NOW())";
         $stmt = $db->prepare($query);
         
+        error_log("Executing donation insert: donor_id=$donor_id, charity_id=$charity_id, amount=$amount, module_id=$module_id");
+        
         if ($stmt->execute([$donor_id, $charity_id, $amount, $module_id, $coin_count])) {
             $donation_id = $db->lastInsertId();
+            error_log("Donation recorded successfully with ID: " . $donation_id);
             
-            // Get donor and charity info for notification
+            // Get donor and charity info
             $donor_user_id = get_donor_user_id($donor_id, $db);
             $charity_name = get_charity_name($charity_id, $db);
             
-            // Create verifiable donation record
+            error_log("Donor: $donor_user_id, Charity: $charity_name");
+            
+            // Create verifiable donation record if function exists
             if (function_exists('create_verifiable_donation')) {
-                create_verifiable_donation($donor_id, $donor_user_id, $charity_id, $amount, $module_id, $db);
+                try {
+                    create_verifiable_donation($donor_id, $donor_user_id, $charity_id, $amount, $module_id, $db);
+                    error_log("Verifiable donation record created");
+                } catch (Exception $e) {
+                    error_log("Warning: Could not create verifiable record: " . $e->getMessage());
+                }
+            } else {
+                error_log("Warning: create_verifiable_donation function not found");
             }
             
-            // Notify WebSocket about new donation
-            notify_websocket('new_donation', [
-                'donation_id' => $donation_id,
-                'donor_id' => $donor_id,
-                'donor_user_id' => $donor_user_id,
-                'charity_id' => $charity_id,
-                'charity_name' => $charity_name,
-                'amount' => $amount,
-                'module_id' => $module_id,
-                'timestamp' => date('Y-m-d H:i:s')
-            ]);
-            
-            echo json_encode([
+            $response = [
                 'success' => true, 
                 'message' => 'Donation recorded successfully',
                 'donation_id' => $donation_id,
                 'donor_id' => $donor_user_id,
                 'charity_id' => $charity_id,
                 'charity_name' => $charity_name,
-                'amount' => $amount
-            ]);
+                'amount' => $amount,
+                'module_id' => $module_id
+            ];
+            
+            error_log("Sending success response: " . json_encode($response));
+            echo json_encode($response);
+            
         } else {
             $errorInfo = $stmt->errorInfo();
             error_log("Donation insert failed: " . print_r($errorInfo, true));
             http_response_code(500);
-            echo json_encode(['success' => false, 'message' => 'Failed to record donation: ' . ($errorInfo[2] ?? 'Unknown error')]);
+            echo json_encode(['success' => false, 'message' => 'Database error: ' . ($errorInfo[2] ?? 'Unknown error')]);
         }
+        
     } catch (Exception $e) {
         http_response_code(500);
-        error_log("Record donation error: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Failed to record donation: ' . $e->getMessage()]);
+        error_log("Record donation exception: " . $e->getMessage());
+        error_log("Exception trace: " . $e->getTraceAsString());
+        echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
     }
 }
-
 /**
  * Start a donation session (when donor scans QR code)
  */
