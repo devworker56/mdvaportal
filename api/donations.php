@@ -316,10 +316,13 @@ function getDonationStats($db, $data) {
 /**
  * Get donation history for a donor
  */
+/**
+ * Get donation history for a donor
+ */
 function getDonationHistory($db, $data) {
     $donor_id = $data['donor_id'] ?? '';
-    $limit = $data['limit'] ?? 50;
-    $offset = $data['offset'] ?? 0;
+    $limit = isset($data['limit']) ? (int)$data['limit'] : 50; // Cast to integer
+    $offset = isset($data['offset']) ? (int)$data['offset'] : 0; // Cast to integer
     
     if (empty($donor_id)) {
         http_response_code(400);
@@ -340,7 +343,7 @@ function getDonationHistory($db, $data) {
               ORDER BY d.created_at DESC
               LIMIT ? OFFSET ?";
     $stmt = $db->prepare($query);
-    $stmt->execute([$donor_id, $limit, $offset]);
+    $stmt->execute([$donor_id, $limit, $offset]); // Use prepared statements for LIMIT/OFFSET
     $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     // Get total count for pagination
