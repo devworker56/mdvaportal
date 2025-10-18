@@ -1,5 +1,6 @@
 {
     "require": {
-        "cboden/ratchet": "^0.4.4"
+        "cboden/ratchet": "^0.4.4",
+        "pusher/pusher-php-server": "^7.2"
     }
 }
